@@ -1,0 +1,40 @@
+name: Build GTOCutCorners 20x
+on:
+  push:
+    branches: [chatgpt-gtoc-20x-build]
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download upstream release jar
+        shell: pwsh
+        run: Invoke-WebRequest -Uri "https://github.com/harmonicola/GTOCutCorners/releases/download/1.4.0/0000_gtocutcorners-1.4.0beta.jar" -OutFile upstream.jar
+      - name: Download native sources
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/harmonicola/GTOCutCorners/master/src/main/native/patcher.c" -OutFile patcher.c
+          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/harmonicola/GTOCutCorners/master/src/main/native/jvmti_patch.c" -OutFile jvmti_patch.c
+      - name: Patch native sources for 20x durations
+        shell: python
+        run: |
+          from pathlib import Path
+          p=Path('patcher.c'); s=p.read_text(encoding='utf-8'); s=s.replace('if (dd != 1) { (*e)->SetIntField(e, d, durF, 1); dC++; }','jint nd=(dd+19)/20;if(nd<1)nd=1;if(dd!=nd){(*e)->SetIntField(e,d,durF,nd);dC++;}'); p.write_text(s,encoding='utf-8')
+          p=Path('jvmti_patch.c'); s=p.read_text(encoding='utf-8'); s=s.replace('mod[i+1]=0x00;mod[i+2]=0x01;rp++;','mod[i+1]=0x00;mod[i+2]=0x14;rp++;',1); s=s.replace('mod[i+1]=0x00;mod[i+2]=0x01;rp++;','mod[i+1]=0x00;mod[i+2]=0x1E;rp++;',1); s=s.replace('mod[i+1]=0x00;mod[i+2]=0x01;rp++;','mod[i+1]=0x01;mod[i+2]=0x2C;rp++;',1); start=s.find('    /* 1c. RecipeModifier OVERCLOCKING:'); end=s.find('rm_done:',start); s=s[:start]+'    /* 1c. RecipeModifier overclocking patch disabled for proportional 20x mode. */\n'+s[end:] if start!=-1 and end!=-1 else s; s=s.replace('    /* 1c. RecipeModifier retransform for overclocking patch */','    /* 1c. RecipeModifier retransform disabled for proportional 20x mode */').replace('    {\n        const char* rm="com/gregtechceu/gtceu/api/recipe/modifier/RecipeModifier";','    if(0){\n        const char* rm="com/gregtechceu/gtceu/api/recipe/modifier/RecipeModifier";',1); p.write_text(s,encoding='utf-8')
+      - name: Build Windows native DLL
+        shell: cmd
+        run: cl /LD /Fe:libgtocutcorners_native.dll patcher.c /I"%JAVA_HOME%\include" /I"%JAVA_HOME%\include\win32" /O2
+      - name: Replace native DLL in jar
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force unpack | Out-Null
+          Push-Location unpack
+          jar xf ..\upstream.jar
+          Copy-Item ..\libgtocutcorners_native.dll native\libgtocutcorners_native.dll -Force
+          jar cfM ..\GTOCutCorners-1.4.0-20x.jar .
+          Pop-Location
+      - name: Upload mod jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: GTOCutCorners-1.4.0-20x
+          path: GTOCutCorners-1.4.0-20x.jar
